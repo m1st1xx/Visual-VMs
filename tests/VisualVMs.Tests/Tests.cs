@@ -306,12 +306,13 @@ public class TopologyTests
         try
         {
             File.WriteAllText(path, $$"""
-                {"vms":[null,{"vmx":null},{"vmx":""},{"vmx":"C:\\ok\\ok.vmx"}],
+                {"vms":[null,{"vmx":null},{"vmx":""},{"vmx":"C:\\ok\\ok.vmx"},{"vmx":"rel\\a.vmx"},{"vmx":"C:a.vmx"},{"vmx":"\\\\srv\\share\\a.vmx"},
+                        {"vmx":"//srv/share/a.vmx"},{"vmx":"\\\\?\\C:\\a\\a.vmx"},{"vmx":"\\??\\C:\\a\\a.vmx"},{"vmx":"C:\\ok\\ok.txt"},{"vmx":"D:/ok/UP.VMX"}],
                  "hubs":[null,{"name":"lan","pvnId":null},{"name":"lan","pvnId":"p1"},{"name":"","pvnId":"{{Pvn}}"},
                          {"name":"a\"\nb","pvnId":"{{Pvn}}"},{"name":"good","pvnId":"{{Pvn.ToUpperInvariant()}}"},{"name":"x","pvnId":"{{Pvn}}\nk = \"v"}]}
                 """);
             var s = Scheme.Load(path);
-            Assert.Equal(@"C:\ok\ok.vmx", Assert.Single(s.Vms).Vmx);
+            Assert.Equal(new[] { @"C:\ok\ok.vmx", "D:/ok/UP.VMX" }, s.Vms.Select(v => v.Vmx));
             Assert.Equal("good", Assert.Single(s.Hubs).Name);
         }
         finally { File.Delete(path); }
@@ -460,8 +461,20 @@ public class VmwareTests
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var r = await Vmware.Run("cmd.exe", ["/c", "start", "/b", "ping", "-n", "8", "127.0.0.1"], 1500);
         Assert.True(sw.ElapsedMilliseconds < 5000, $"took {sw.ElapsedMilliseconds} ms");
-        Assert.False(r.Ok);
-        Assert.Contains("Превышено время ожидания", r.Out);
+        Assert.True(r.Ok); // cmd itself exited 0: its result stands
+
+        var hung = await Vmware.Run("cmd.exe", ["/c", "ping", "-n", "8", "127.0.0.1"], 1500);
+        Assert.False(hung.Ok);
+        Assert.Contains("Превышено время ожидания", hung.Out);
+    }
+
+    [Fact]
+    public void SoftStopFailureMessage()
+    {
+        Assert.Null(Vmware.SoftStopFailure((true, "")));
+        Assert.Contains("60 с", Vmware.SoftStopFailure((false, "Превышено время ожидания: vmrun.exe -T ws stop x soft")));
+        Assert.Equal("мягкое выключение не удалось: Error: boom", Vmware.SoftStopFailure((false, "Error: boom")));
+        Assert.Equal("мягкое выключение не удалось", Vmware.SoftStopFailure((false, "")));
     }
 
     [Fact]

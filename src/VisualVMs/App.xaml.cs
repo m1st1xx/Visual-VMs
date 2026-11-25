@@ -11,6 +11,8 @@ public partial class App : Application
         {
             MessageBox.Show(a.Exception.Message, "Visual VMs", MessageBoxButton.OK, MessageBoxImage.Error);
             a.Handled = true;
+            // failed before the window came up: nothing to keep alive, do not linger as a windowless process
+            if (MainWindow is not { IsLoaded: true }) Shutdown();
         };
         base.OnStartup(e);
     }

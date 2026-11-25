@@ -17,7 +17,8 @@ public partial class MainWindow : Window
     static readonly object InternetKey = new();
     static readonly string LastPath = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VisualVMs", "last.txt");
     const string GuiWarning = "VMware Workstation открыт — закройте его, иначе имя сегмента может пропасть из VMware (сеть будет работать)";
-    const string VmxGuiWarning = "VMware Workstation открыт — закройте вкладку ВМ, иначе VMware может перезаписать изменения сети";
+    const string Working = "Выполняется…";
+    const string VmxGuiWarning ="VMware Workstation открыт — закройте вкладку ВМ, иначе VMware может перезаписать изменения сети";
 
     Scheme scheme = new();
     string? path;
@@ -43,7 +44,7 @@ public partial class MainWindow : Window
             try
             {
                 var last = File.Exists(LastPath) ? File.ReadAllText(LastPath).Trim() : "";
-                if (File.Exists(last)) OpenScheme(last); else Resync();
+                if (File.Exists(last)) OpenScheme(last, startup: true); else Resync();
             }
             catch (Exception ex)
             {
@@ -185,12 +186,12 @@ public partial class MainWindow : Window
         busy = true;
         MainMenu.IsEnabled = Board.IsEnabled = false;
         Cursor = Cursors.Wait;
-        Status.Text = "Выполняется…";
+        Status.Text = Working;
         try { await work(); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "Visual VMs", MessageBoxButton.OK, MessageBoxImage.Error); }
         finally
         {
-            if (Status.Text == "Выполняется…") Status.Text = "";
+            if (Status.Text == Working) Status.Text = "";
             busy = false;
             MainMenu.IsEnabled = Board.IsEnabled = true;
             Cursor = null;
@@ -444,7 +445,7 @@ public partial class MainWindow : Window
         bool gui = Vmware.GuiRunning, ok;
         try { ok = await Vmware.ApplyAsync(edits); }
         finally { Resync(); }
-        if (ok && gui) Status.Text = (Status.Text == GuiWarning ? GuiWarning + ". " : "") + VmxGuiWarning;
+        if (ok && gui) Status.Text = (Status.Text is "" or Working ? "" : Status.Text + ". ") + VmxGuiWarning;
         return ok;
     }
 
@@ -531,10 +532,20 @@ public partial class MainWindow : Window
 
     // ---- files ----
 
-    void OpenScheme(string file)
+    void OpenScheme(string file, bool startup = false)
     {
         try { scheme = Scheme.Load(file); }
-        catch (Exception ex) { Error($"Не удалось открыть {file}: {ex.Message}"); return; }
+        catch (Exception ex)
+        {
+            (scheme, path, dirty) = (new(), null, false);
+            // forget the broken file so the error is not repeated on every start
+            if (startup)
+                try { File.Delete(LastPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            Resync();
+            UpdateTitle();
+            Error($"Не удалось открыть {file}: {ex.Message}");
+            return;
+        }
         path = file;
         dirty = false;
         RememberPath();

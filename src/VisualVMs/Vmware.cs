@@ -22,6 +22,8 @@ public static class Vmware
     public static string PrefsPath => Path.Combine(AppData, "VMware", "preferences.ini");
     static string InventoryPath => Path.Combine(AppData, "VMware", "inventory.vmls");
 
+    const string TimedOut = "Превышено время ожидания";
+
     public static async Task<(bool Ok, string Out)> Run(string exe, string[] args, int timeoutMs = 30000)
     {
         var psi = new ProcessStartInfo(exe)
@@ -43,10 +45,12 @@ public static class Vmware
         }
         catch (OperationCanceledException)
         {
-            // not Kill(true): the process tree can contain a VM process
-            try { p.Kill(); } catch (InvalidOperationException) { }
             string Done(Task<string> t) => t.IsCompletedSuccessfully ? t.Result : "";
-            return (false, $"Превышено время ожидания: {Path.GetFileName(exe)} {string.Join(" ", args)}\n{Done(stdout)}{Done(stderr)}".Trim());
+            // the command itself finished; only a child still holds the pipes
+            if (p.HasExited) return (p.ExitCode == 0, (Done(stdout) + Done(stderr)).Trim());
+            // not Kill(true): the process tree can contain a VM process
+            try { p.Kill(); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            return (false, $"{TimedOut}: {Path.GetFileName(exe)} {string.Join(" ", args)}\n{Done(stdout)}{Done(stderr)}".Trim());
         }
         return (p.ExitCode == 0, (stdout.Result + stderr.Result).Trim());
     }
@@ -71,15 +75,26 @@ public static class Vmware
     /// <summary>Soft stop; if it fails or times out, asks before a hard power-off. Returns false if the user said No.</summary>
     public static async Task<bool> StopSoftThenHard(string vmx)
     {
-        if (!(await Run(Vmrun, ["-T", "ws", "stop", vmx, "soft"], 60000)).Ok)
+        // without running Tools a soft stop only waits out its whole timeout
+        var tools = await Run(Vmrun, ["-T", "ws", "checkToolsState", vmx], 10000);
+        var failed = !tools.Out.Equals("running", StringComparison.OrdinalIgnoreCase)
+            ? "VMware Tools не запущены — мягкое выключение невозможно"
+            : SoftStopFailure(await Run(Vmrun, ["-T", "ws", "stop", vmx, "soft"], 60000));
+        if (failed != null)
         {
-            if (MessageBox.Show($"{Path.GetFileNameWithoutExtension(vmx)}: мягкое выключение не удалось (нет VMware Tools?). Выключить принудительно?",
-                    "Visual VMs", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
+            if (MessageBox.Show($"{Path.GetFileNameWithoutExtension(vmx)}: {failed}. Выключить принудительно?",
+                    "Visual VMs", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return false;
             Check(await Run(Vmrun, ["-T", "ws", "stop", vmx, "hard"]));
         }
         await WaitStopped(vmx);
         return true;
     }
+
+    /// <summary>Why a soft stop did not work, or null if it did.</summary>
+    public static string? SoftStopFailure((bool Ok, string Out) soft) =>
+        soft.Ok ? null
+        : soft.Out.StartsWith(TimedOut) ? "гостевая ОС ещё выключается (прошло 60 с)"
+        : "мягкое выключение не удалось" + (soft.Out.Length > 0 ? ": " + soft.Out : "");
 
     static async Task WaitStopped(string vmx)
     {
@@ -106,7 +121,9 @@ public static class Vmware
         {
             File.Delete(vmx + ".vvm.bak");
             var dir = Path.GetDirectoryName(Full(vmx))!;
-            if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); // never recursive
+            // only the VM's own folder (named like the vmx), never recursive
+            if (Path.GetFileName(dir).Equals(Path.GetFileNameWithoutExtension(vmx), StringComparison.OrdinalIgnoreCase)
+                && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         if (GuiRunning) return "VMware открыт"; // it keeps the library in memory and would write the entry back
@@ -226,11 +243,17 @@ public static class Vmware
                 saved.Add((vmx, orig));
             }
         }
-        catch
+        catch (Exception error)
         {
             // all-or-nothing: put back the VMs already written
+            var notRestored = new List<string>();
             foreach (var (vmx, orig) in saved)
-                try { File.WriteAllBytes(vmx, orig); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                try { File.WriteAllBytes(vmx, orig); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { notRestored.Add(vmx); }
+            foreach (var (vmx, _, _) in loaded)
+                try { File.Delete(vmx + ".tmp"); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            if (notRestored.Count > 0)
+                throw new InvalidOperationException($"{error.Message}\n\nНе удалось вернуть исходный текст:{string.Join(", ", notRestored)}", error);
             throw;
         }
         return true;

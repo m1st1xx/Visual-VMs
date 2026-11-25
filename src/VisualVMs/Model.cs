@@ -57,10 +57,15 @@ public class Scheme
     {
         var s = JsonSerializer.Deserialize<Scheme>(File.ReadAllText(path), Opts) ?? throw new InvalidDataException("Пустой файл схемы");
         s.Internet ??= new(80, 80);
-        s.Vms = (s.Vms ?? new()).Where(v => v != null && !string.IsNullOrEmpty(v.Vmx) && v.Vmx.IndexOfAny(Path.GetInvalidPathChars()) < 0).ToList();
+        s.Vms = (s.Vms ?? new()).Where(v => v != null && IsLocalVmx(v.Vmx)).ToList();
         s.Hubs = (s.Hubs ?? new()).Where(h => h != null && !string.IsNullOrEmpty(h.Name) && KvFile.IsSafeValue(h.Name) && KvFile.IsPvnId(h.PvnId)).ToList();
         return s;
     }
+
+    // a leading \ or / covers UNC (\\server, //server) and device paths (\\?\, \??\)
+    static bool IsLocalVmx(string? p) =>
+        !string.IsNullOrEmpty(p) && p.IndexOfAny(Path.GetInvalidPathChars()) < 0 && Path.IsPathFullyQualified(p)
+        && p[0] is not ('\\' or '/') && p.EndsWith(".vmx", StringComparison.OrdinalIgnoreCase);
 }
 
 public enum EdgeKind { Direct, Hub, Nat }
