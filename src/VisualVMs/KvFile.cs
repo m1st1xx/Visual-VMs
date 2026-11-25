@@ -9,25 +9,41 @@ namespace VisualVMs;
 public class KvFile
 {
     static readonly Regex KeyRx = new(@"^\s*([^=]+?)\s*=\s*""(.*)""\s*$");
+    static readonly Regex PvnRx = new(@"^([0-9a-f]{2} ){7}[0-9a-f]{2}-([0-9a-f]{2} ){7}[0-9a-f]{2}$", RegexOptions.IgnoreCase);
+    // split on '\n' only; each line keeps its own trailing '\r', so mixed CRLF/LF files round-trip and keys are never merged
     readonly List<string> lines;
-    readonly string nl;
-    readonly bool bom;
+    readonly bool crlf, bom;
+    readonly string? notUtf8;
 
-    public KvFile(string text, bool bom = false)
+    public KvFile(string text, bool bom = false) : this(text, bom, null) { }
+
+    KvFile(string text, bool bom, string? notUtf8)
     {
-        nl = text.Contains("\r\n") ? "\r\n" : "\n";
-        lines = text.Split(nl).ToList();
+        crlf = text.Contains("\r\n");
+        lines = text.Split('\n').ToList();
         this.bom = bom;
+        this.notUtf8 = notUtf8;
     }
 
-    public static KvFile Load(string path)
+    public static KvFile Load(string path) => Parse(File.ReadAllBytes(path));
+
+    public static KvFile Parse(byte[] bytes)
     {
-        var bytes = File.ReadAllBytes(path);
         bool bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
-        return new KvFile(Encoding.UTF8.GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0)), bom);
+        int skip = bom ? 3 : 0;
+        try { return new KvFile(new UTF8Encoding(false, true).GetString(bytes, skip, bytes.Length - skip), bom, null); }
+        catch (DecoderFallbackException)
+        {
+            // still readable for ASCII keys, but saving would replace the invalid bytes with U+FFFD
+            return new KvFile(Encoding.UTF8.GetString(bytes, skip, bytes.Length - skip), bom, "Файл не в UTF-8 — меняйте сеть в VMware");
+        }
     }
 
-    public override string ToString() => string.Join(nl, lines);
+    public static bool IsPvnId(string? s) => s != null && PvnRx.IsMatch(s);
+
+    public static bool IsSafeValue(string? s) => s != null && s.IndexOfAny(new[] { '"', '\r', '\n' }) < 0;
+
+    public override string ToString() => string.Join("\n", lines);
 
     /// <summary>Writes to path.tmp, then moves over path so a crash never leaves a half-written file.</summary>
     public void Save(string path)
@@ -36,8 +52,8 @@ public class KvFile
         File.Move(path + ".tmp", path, overwrite: true);
     }
 
-    /// <summary>False when .encoding is set to something other than UTF-8: we would corrupt non-ASCII text.</summary>
-    public bool CanEdit => Get(".encoding") is not { } e || e.Equals("UTF-8", StringComparison.OrdinalIgnoreCase);
+    /// <summary>False when the bytes are not valid UTF-8 or .encoding is something else: we would corrupt non-ASCII text.</summary>
+    public bool CanEdit => notUtf8 == null && (Get(".encoding") is not { } e || e.Equals("UTF-8", StringComparison.OrdinalIgnoreCase));
 
     int Find(string key)
     {
@@ -59,17 +75,22 @@ public class KvFile
 
     void CheckEdit()
     {
+        if (notUtf8 != null) throw new InvalidOperationException(notUtf8);
         if (!CanEdit) throw new InvalidOperationException($"Файл в кодировке {Get(".encoding")} — изменение не поддерживается");
     }
 
     public void Set(string key, string value)
     {
         CheckEdit();
+        // a quote or newline would let an untrusted value inject other keys
+        if (!IsSafeValue(value)) throw new ArgumentException($"Недопустимое значение {key}: кавычки и переводы строк запрещены", nameof(value));
         int i = Find(key);
-        if (i >= 0) { lines[i] = $"{KeyRx.Match(lines[i]).Groups[1].Value} = \"{value}\""; return; }
+        if (i >= 0) { lines[i] = $"{KeyRx.Match(lines[i]).Groups[1].Value} = \"{value}\"" + (lines[i].EndsWith('\r') ? "\r" : ""); return; }
+        var line = $"{key} = \"{value}\"";
         // keep a trailing newline at the end of the file
-        int at = lines.Count > 0 && lines[^1] == "" ? lines.Count - 1 : lines.Count;
-        lines.Insert(at, $"{key} = \"{value}\"");
+        if (lines.Count > 0 && lines[^1] == "") { lines.Insert(lines.Count - 1, line + (crlf ? "\r" : "")); return; }
+        if (crlf && lines.Count > 0 && !lines[^1].EndsWith('\r')) lines[^1] += "\r";
+        lines.Add(line);
     }
 
     public void RemoveWhere(string keyPrefix)
@@ -107,6 +128,19 @@ public class KvFile
 
     // trailing dot so ethernet1. does not hit ethernet10.
     public void RemoveNic(int n) => RemoveWhere($"ethernet{n}.");
+
+    // ---- library (inventory.vmls) ----
+
+    /// <summary>Removes all vmlistN.* keys of entries whose vmlistN.config is <paramref name="fullVmx"/>. Returns whether the file changed.</summary>
+    public bool RemoveVmListEntry(string fullVmx)
+    {
+        // shortcut: compares the stored path as text (VMware stores it normalized); upgrade to GetFullPath if entries are missed
+        var prefixes = Keys.Select(key => Regex.Match(key, @"^(vmlist\d+)\.config$", RegexOptions.IgnoreCase))
+                           .Where(m => m.Success && string.Equals(Get(m.Value), fullVmx, StringComparison.OrdinalIgnoreCase))
+                           .Select(m => m.Groups[1].Value + ".").ToList();
+        foreach (var p in prefixes) RemoveWhere(p); // trailing dot: vmlist1. does not hit vmlist10.
+        return prefixes.Count > 0;
+    }
 
     public static string NewPvnId()
     {

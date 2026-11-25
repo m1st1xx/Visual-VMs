@@ -45,14 +45,20 @@ public class Scheme
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public void Save(string path) => File.WriteAllText(path, JsonSerializer.Serialize(this, Opts));
+    /// <summary>Writes to path.tmp, then moves over path so a crash never leaves a half-written file.</summary>
+    public void Save(string path)
+    {
+        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(this, Opts));
+        File.Move(path + ".tmp", path, overwrite: true);
+    }
 
+    /// <summary>The file is untrusted: entries that would break the app or inject keys into vmx/preferences.ini are dropped.</summary>
     public static Scheme Load(string path)
     {
         var s = JsonSerializer.Deserialize<Scheme>(File.ReadAllText(path), Opts) ?? throw new InvalidDataException("Пустой файл схемы");
         s.Internet ??= new(80, 80);
-        s.Vms ??= new();
-        s.Hubs ??= new();
+        s.Vms = (s.Vms ?? new()).Where(v => v != null && !string.IsNullOrEmpty(v.Vmx) && v.Vmx.IndexOfAny(Path.GetInvalidPathChars()) < 0).ToList();
+        s.Hubs = (s.Hubs ?? new()).Where(h => h != null && !string.IsNullOrEmpty(h.Name) && KvFile.IsSafeValue(h.Name) && KvFile.IsPvnId(h.PvnId)).ToList();
         return s;
     }
 }
@@ -66,6 +72,15 @@ public static class Topology
 {
     public static string SegmentName(string pvnId, IReadOnlyDictionary<string, string> segments) =>
         segments.TryGetValue(pvnId, out var n) ? n : "Сегмент " + pvnId[..Math.Min(5, pvnId.Length)];
+
+    /// <summary><paramref name="name"/>, or name-2, name-3… — the first one no existing segment uses (it may belong to another lab).</summary>
+    public static string FreeSegmentName(string name, IReadOnlyDictionary<string, string> segments)
+    {
+        var used = segments.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var free = name;
+        for (int i = 2; used.Contains(free); i++) free = $"{name}-{i}";
+        return free;
+    }
 
     /// <summary>Builds edges from the VMs' NICs. Adds auto-created hubs to <paramref name="hubs"/>.</summary>
     public static List<Edge> Infer(List<VmNode> vms, List<HubNode> hubs, IReadOnlyDictionary<string, string> segments)

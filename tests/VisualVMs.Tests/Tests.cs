@@ -204,11 +204,118 @@ public class KvFileTests
         Assert.Equal("new", f.Get("pref.namedPVNs5.name"));
         Assert.Equal("6", f.Get("pref.namedPVNs.count"));
     }
+
+    // review #2: windows-1251 vmx without .encoding must not be rewritten with U+FFFD
+    [Fact]
+    public void InvalidUtf8BytesRefuseEdits()
+    {
+        var bytes = System.Text.Encoding.ASCII.GetBytes("displayName = \"").Concat(new byte[] { 0xCF, 0xF0 }).Concat(System.Text.Encoding.ASCII.GetBytes("\"\nmemsize = \"1024\"\n")).ToArray();
+        var f = KvFile.Parse(bytes);
+        Assert.False(f.CanEdit);
+        Assert.Equal("1024", f.Get("memsize"));
+        Assert.Contains("UTF-8", Assert.Throws<InvalidOperationException>(() => f.Set("memsize", "2048")).Message);
+        Assert.Throws<InvalidOperationException>(() => f.RemoveNic(0));
+        Assert.True(KvFile.Parse(System.Text.Encoding.UTF8.GetBytes("displayName = \"тест\"\n")).CanEdit);
+    }
+
+    // review #3: values from an untrusted .vvm must not inject keys
+    [Theory]
+    [InlineData("a\" b = \"c")]
+    [InlineData("a\nb = \"c\"")]
+    [InlineData("a\r")]
+    public void SetRejectsQuotesAndNewlines(string value)
+    {
+        var f = new KvFile("x = \"1\"\n");
+        Assert.Throws<ArgumentException>(() => f.Set("x", value));
+        Assert.Throws<ArgumentException>(() => f.EnsureSegment(value, out _));
+        Assert.Equal("x = \"1\"\n", f.ToString());
+    }
+
+    // review #10: keys on LF lines inside a CRLF file are not merged; each line keeps its ending
+    [Fact]
+    public void MixedLineEndings()
+    {
+        const string text = "a = \"1\"\r\nb = \"2\"\nc = \"3\"\r\n";
+        var f = new KvFile(text);
+        Assert.Equal(text, f.ToString());
+        Assert.Equal(("1", "2", "3"), (f.Get("a"), f.Get("b"), f.Get("c")));
+        f.Set("b", "x");
+        f.Set("a", "y");
+        f.Set("d", "4");
+        Assert.Equal("a = \"y\"\r\nb = \"x\"\nc = \"3\"\r\nd = \"4\"\r\n", f.ToString());
+        f.RemoveWhere("c");
+        Assert.Equal("a = \"y\"\r\nb = \"x\"\nd = \"4\"\r\n", f.ToString());
+    }
+
+    [Fact]
+    public void AppendToCrlfFileWithoutTrailingNewline()
+    {
+        var f = new KvFile("a = \"1\"\r\nb = \"2\"");
+        f.Set("c", "3");
+        Assert.Equal("a = \"1\"\r\nb = \"2\"\r\nc = \"3\"", f.ToString());
+        var g = new KvFile("a = \"1\"");
+        g.RemoveWhere("a");
+        g.Set("b", "2");
+        Assert.Equal("b = \"2\"", g.ToString());
+    }
+
+    // sandbox B2: stale library entry after deleteVM
+    [Fact]
+    public void RemoveVmListEntryDropsOnlyThatEntry()
+    {
+        var f = new KvFile(
+            ".encoding = \"UTF-8\"\r\n" +
+            "vmlist1.config = \"E:\\VMs\\a\\a.vmx\"\r\nvmlist1.DisplayName = \"a\"\r\nvmlist1.ItemID = \"1\"\r\n" +
+            "vmlist10.config = \"E:\\VMs\\b\\b.vmx\"\r\nvmlist10.DisplayName = \"b\"\r\n" +
+            "index0.id = \"E:\\VMs\\a\\a.vmx\"\r\n");
+        Assert.True(f.RemoveVmListEntry(@"e:\vms\A\A.vmx"));
+        Assert.Equal(".encoding = \"UTF-8\"\r\nvmlist10.config = \"E:\\VMs\\b\\b.vmx\"\r\nvmlist10.DisplayName = \"b\"\r\nindex0.id = \"E:\\VMs\\a\\a.vmx\"\r\n", f.ToString());
+        Assert.False(f.RemoveVmListEntry(@"E:\VMs\c\c.vmx"));
+    }
+
+    [Fact]
+    public void IsPvnIdFormat()
+    {
+        Assert.True(KvFile.IsPvnId("52 AB 01 02 03 04 05 06-07 08 09 0a 0b 0c 0d 0e"));
+        Assert.True(KvFile.IsPvnId(KvFile.NewPvnId()));
+        Assert.False(KvFile.IsPvnId("p1"));
+        Assert.False(KvFile.IsPvnId(null));
+        Assert.False(KvFile.IsPvnId("52 ab 01 02 03 04 05 06-07 08 09 0a 0b 0c 0d 0e\""));
+    }
 }
 
 public class TopologyTests
 {
     static readonly Dictionary<string, string> Segs = new() { ["p1"] = "lan1" };
+    const string Pvn = "52 ab 01 02 03 04 05 06-07 08 09 0a 0b 0c 0d 0e";
+
+    // review #5: a same-named segment may belong to another lab
+    [Fact]
+    public void FreeSegmentNameSkipsUsedNames()
+    {
+        Assert.Equal("a-b", Topology.FreeSegmentName("a-b", Segs));
+        var used = new Dictionary<string, string> { ["x"] = "A-B", ["y"] = "a-b-2", ["z"] = "a-b-4" };
+        Assert.Equal("a-b-3", Topology.FreeSegmentName("a-b", used));
+    }
+
+    // review #3/#6: a bad .vvm must not crash the app or reach vmx/preferences.ini
+    [Fact]
+    public void SchemeLoadDropsInvalidEntries()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vvm");
+        try
+        {
+            File.WriteAllText(path, $$"""
+                {"vms":[null,{"vmx":null},{"vmx":""},{"vmx":"C:\\ok\\ok.vmx"}],
+                 "hubs":[null,{"name":"lan","pvnId":null},{"name":"lan","pvnId":"p1"},{"name":"","pvnId":"{{Pvn}}"},
+                         {"name":"a\"\nb","pvnId":"{{Pvn}}"},{"name":"good","pvnId":"{{Pvn.ToUpperInvariant()}}"},{"name":"x","pvnId":"{{Pvn}}\nk = \"v"}]}
+                """);
+            var s = Scheme.Load(path);
+            Assert.Equal(@"C:\ok\ok.vmx", Assert.Single(s.Vms).Vmx);
+            Assert.Equal("good", Assert.Single(s.Hubs).Name);
+        }
+        finally { File.Delete(path); }
+    }
 
     static VmNode Vm(string name, params Nic[] nics) => new() { Vmx = name + ".vmx", Name = name, X = 100, Y = 100, Nics = nics.ToList() };
 
@@ -295,7 +402,7 @@ public class TopologyTests
     {
         var s = new Scheme { Internet = new(10, 20) };
         s.Vms.Add(new VmNode { Vmx = @"C:\vm\a.vmx", Purpose = Purpose.Router, X = 1.5, Y = 2, Name = "ignored" });
-        s.Hubs.Add(new HubNode { Name = "lan", PvnId = "p1", X = 3, Y = 4 });
+        s.Hubs.Add(new HubNode { Name = "lan", PvnId = Pvn, X = 3, Y = 4 });
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vvm");
         try
         {
@@ -309,7 +416,7 @@ public class TopologyTests
             var v = Assert.Single(l.Vms);
             Assert.Equal((@"C:\vm\a.vmx", Purpose.Router, 1.5, 2.0), (v.Vmx, v.Purpose, v.X, v.Y));
             var h = Assert.Single(l.Hubs);
-            Assert.Equal(("lan", "p1", 3.0, 4.0), (h.Name, h.PvnId, h.X, h.Y));
+            Assert.Equal(("lan", Pvn, 3.0, 4.0), (h.Name, h.PvnId, h.X, h.Y));
         }
         finally { File.Delete(path); }
     }
