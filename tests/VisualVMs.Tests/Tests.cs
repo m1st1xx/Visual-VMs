@@ -517,6 +517,7 @@ public class UiSmokeTests
             try
             {
                 var w = new MainWindow();
+                Assert.NotNull(w.Icon);
                 foreach (var key in new[] { "Router", "Server", "Client", "Cloud" })
                     Assert.IsAssignableFrom<System.Windows.Media.Geometry>(w.FindResource(key));
                 new CreateVmWindow();

@@ -209,7 +209,7 @@ public partial class MainWindow : Window
         var ok = new Button { Content = "OK", IsDefault = true, Width = 80 };
         var w = new Window
         {
-            Title = "Visual VMs", Owner = this, SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize,
+            Title = "Visual VMs", Icon = Icon, Owner = this, SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Content = new StackPanel
             {

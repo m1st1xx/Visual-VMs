@@ -1,7 +1,7 @@
 ﻿<Window x:Class="VisualVMs.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Visual VMs" Height="800" Width="1200"
+        Title="Visual VMs" Icon="app.ico" Height="800" Width="1200"
         PreviewKeyDown="Window_PreviewKeyDown" Closing="Window_Closing">
     <Window.Resources>
         <StreamGeometry x:Key="Router">M4,18 A20,8 0 1 0 44,18 A20,8 0 1 0 4,18 Z M4,18 V30 A20,8 0 0 0 44,30 V18 M16,18 H32 M28,15 L32,18 L28,21 M20,15 L16,18 L20,21</StreamGeometry>
