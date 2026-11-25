@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.RegularExpressions;
 
 namespace VisualVMs.Tests;
@@ -287,5 +288,29 @@ public class VmwareTests
             Assert.NotNull(Vmware.Validate(ok with { DiskGb = 2001 }, root));
         }
         finally { Directory.Delete(root, true); }
+    }
+}
+
+public class UiSmokeTests
+{
+    [Fact]
+    public void MainWindowXamlAndIconsLoad()
+    {
+        Exception? error = null;
+        // constructed only, never shown: Loaded (which talks to VMware) does not fire
+        var t = new Thread(() =>
+        {
+            try
+            {
+                var w = new MainWindow();
+                foreach (var key in new[] { "Router", "Server", "Client", "Cloud" })
+                    Assert.IsAssignableFrom<System.Windows.Media.Geometry>(w.FindResource(key));
+            }
+            catch (Exception ex) { error = ex; }
+        });
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+        t.Join();
+        Assert.Null(error);
     }
 }

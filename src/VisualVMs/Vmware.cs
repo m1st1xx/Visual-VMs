@@ -123,10 +123,10 @@ public static class Vmware
     }
 
     /// <summary>Returns the pvnID of the named LAN segment, creating it in preferences.ini if needed.</summary>
-    public static string EnsureSegment(string name)
+    public static string EnsureSegment(string name, out bool wrote)
     {
         string id = "";
-        EditPrefs(k => k.EnsureSegment(name, out id));
+        wrote = EditPrefs(k => k.EnsureSegment(name, out id));
         return id;
     }
 
