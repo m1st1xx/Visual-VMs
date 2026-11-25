@@ -150,3 +150,112 @@ public class KvFileTests
         Assert.Equal("5", f.Get("pref.namedPVNs.count"));
     }
 }
+
+public class TopologyTests
+{
+    static readonly Dictionary<string, string> Segs = new() { ["p1"] = "lan1" };
+
+    static VmNode Vm(string name, params Nic[] nics) => new() { Vmx = name + ".vmx", Name = name, X = 100, Y = 100, Nics = nics.ToList() };
+
+    [Fact]
+    public void TwoVmsOneSegmentIsDirect()
+    {
+        var hubs = new List<HubNode>();
+        var e = Topology.Infer(new() { Vm("a", new Nic(1, "pvn", "p1")), Vm("b", new Nic(0, "pvn", "P1")) }, hubs, Segs);
+        var d = Assert.Single(e);
+        Assert.Equal(EdgeKind.Direct, d.Kind);
+        Assert.Equal(2, d.Ends.Count);
+        Assert.Empty(hubs);
+    }
+
+    [Fact]
+    public void ThreeVmsMakeAutoHub()
+    {
+        var hubs = new List<HubNode>();
+        var e = Topology.Infer(new() { Vm("a", new Nic(0, "pvn", "p1")), Vm("b", new Nic(0, "pvn", "p1")), Vm("c", new Nic(0, "pvn", "p1")) }, hubs, Segs);
+        var h = Assert.Single(hubs);
+        Assert.Equal("lan1", h.Name);
+        Assert.Equal(160, h.X);
+        Assert.Equal(3, e.Count);
+        Assert.All(e, x => { Assert.Equal(EdgeKind.Hub, x.Kind); Assert.Same(h, x.Hub); });
+    }
+
+    [Fact]
+    public void SingleNicMakesHubWithFallbackName()
+    {
+        var hubs = new List<HubNode>();
+        var e = Topology.Infer(new() { Vm("a", new Nic(0, "pvn", "abcdef 12")) }, hubs, Segs);
+        Assert.Equal("Сегмент abcde", Assert.Single(hubs).Name);
+        Assert.Equal(EdgeKind.Hub, Assert.Single(e).Kind);
+    }
+
+    [Fact]
+    public void TwoNicsOnSameVmMakeHub()
+    {
+        var hubs = new List<HubNode>();
+        var e = Topology.Infer(new() { Vm("a", new Nic(0, "pvn", "p1"), new Nic(1, "pvn", "p1")) }, hubs, Segs);
+        Assert.Single(hubs);
+        Assert.Equal(2, e.Count(x => x.Kind == EdgeKind.Hub));
+    }
+
+    [Fact]
+    public void SchemeHubBeatsDirect()
+    {
+        var hubs = new List<HubNode> { new() { Name = "sw", PvnId = "p1" } };
+        var e = Topology.Infer(new() { Vm("a", new Nic(0, "pvn", "p1")), Vm("b", new Nic(0, "pvn", "p1")) }, hubs, Segs);
+        Assert.Equal(2, e.Count);
+        Assert.All(e, x => Assert.Same(hubs[0], x.Hub));
+        Assert.Single(hubs);
+    }
+
+    [Fact]
+    public void NatNicIsNatEdgeAndBridgedIgnored()
+    {
+        var vm = Vm("a", new Nic(0, "nat", null), new Nic(1, "bridged", null));
+        var e = Assert.Single(Topology.Infer(new() { vm }, new(), Segs));
+        Assert.Equal(EdgeKind.Nat, e.Kind);
+        Assert.Equal((vm, 0), Assert.Single(e.Ends));
+    }
+
+    [Fact]
+    public void VmNotOnCanvasIgnored()
+    {
+        // only canvas VMs are passed in: the other end of a direct link is simply absent → single NIC → hub
+        var hubs = new List<HubNode>();
+        var e = Topology.Infer(new() { Vm("a", new Nic(0, "pvn", "p1")) }, hubs, Segs);
+        Assert.Single(e);
+        Assert.DoesNotContain(e, x => x.Kind == EdgeKind.Direct);
+    }
+
+    [Fact]
+    public void HubWithoutNicsSurvives()
+    {
+        var hubs = new List<HubNode> { new() { Name = "empty", PvnId = "zz" } };
+        Assert.Empty(Topology.Infer(new() { Vm("a") }, hubs, Segs));
+        Assert.Single(hubs);
+    }
+
+    [Fact]
+    public void SchemeRoundTrip()
+    {
+        var s = new Scheme { Internet = new(10, 20) };
+        s.Vms.Add(new VmNode { Vmx = @"C:\vm\a.vmx", Purpose = Purpose.Router, X = 1.5, Y = 2, Name = "ignored" });
+        s.Hubs.Add(new HubNode { Name = "lan", PvnId = "p1", X = 3, Y = 4 });
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vvm");
+        try
+        {
+            s.Save(path);
+            var json = File.ReadAllText(path);
+            Assert.Contains("\"purpose\": \"Router\"", json);
+            Assert.DoesNotContain("ignored", json);
+            var l = Scheme.Load(path);
+            Assert.Equal(1, l.Version);
+            Assert.Equal(new Pt(10, 20), l.Internet);
+            var v = Assert.Single(l.Vms);
+            Assert.Equal((@"C:\vm\a.vmx", Purpose.Router, 1.5, 2.0), (v.Vmx, v.Purpose, v.X, v.Y));
+            var h = Assert.Single(l.Hubs);
+            Assert.Equal(("lan", "p1", 3.0, 4.0), (h.Name, h.PvnId, h.X, h.Y));
+        }
+        finally { File.Delete(path); }
+    }
+}
