@@ -259,3 +259,33 @@ public class TopologyTests
         finally { File.Delete(path); }
     }
 }
+
+public class VmwareTests
+{
+    [Fact]
+    public void ValidateCreateRequest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(Path.Combine(root, "busy"));
+        File.WriteAllText(Path.Combine(root, "busy", "x"), "");
+        var iso = Path.Combine(root, "a.iso");
+        File.WriteAllText(iso, "");
+        try
+        {
+            var ok = new CreateVmRequest("r1", "debian13-64", iso, 2048, 2, 20, Purpose.Router);
+            Assert.Null(Vmware.Validate(ok, root));
+            Assert.NotNull(Vmware.Validate(ok with { Name = "" }, root));
+            Assert.NotNull(Vmware.Validate(ok with { Name = "a|b" }, root));
+            Assert.NotNull(Vmware.Validate(ok with { Name = "a\"b" }, root));
+            Assert.NotNull(Vmware.Validate(ok with { Name = "a/b" }, root));
+            Assert.NotNull(Vmware.Validate(ok with { Name = "busy" }, root));
+            Assert.NotNull(Vmware.Validate(ok with { Iso = iso + "x" }, root));
+            Assert.NotNull(Vmware.Validate(ok with { RamMb = 255 }, root));
+            Assert.NotNull(Vmware.Validate(ok with { RamMb = 1026 }, root));
+            Assert.NotNull(Vmware.Validate(ok with { Cpus = 0 }, root));
+            Assert.NotNull(Vmware.Validate(ok with { Cpus = 65 }, root));
+            Assert.NotNull(Vmware.Validate(ok with { DiskGb = 2001 }, root));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+}

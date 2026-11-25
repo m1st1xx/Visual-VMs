@@ -49,6 +49,8 @@ public class KvFile
         return -1;
     }
 
+    public IEnumerable<string> Keys => lines.Select(l => KeyRx.Match(l)).Where(m => m.Success).Select(m => m.Groups[1].Value);
+
     public string? Get(string key)
     {
         int i = Find(key);
