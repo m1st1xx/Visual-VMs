@@ -150,6 +150,60 @@ public class KvFileTests
         Assert.Equal("id9", f.Get("pref.namedPVNs4.pvnID"));
         Assert.Equal("5", f.Get("pref.namedPVNs.count"));
     }
+
+    // QA: real-file round trip with a Cyrillic VM name (as created in the sandbox: "тест2")
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SaveLoadKeepsBomAndCyrillic(bool bom)
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vmx");
+        try
+        {
+            File.WriteAllText(path, ".encoding = \"UTF-8\"\r\ndisplayName = \"тест2\"\r\n", new System.Text.UTF8Encoding(bom));
+            var f = KvFile.Load(path);
+            Assert.Equal("тест2", f.Get("displayName"));
+            f.AddNic("pvn", "aa");
+            f.Save(path);
+            var bytes = File.ReadAllBytes(path);
+            Assert.Equal(bom, bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+            Assert.Equal("тест2", KvFile.Load(path).Get("displayName"));
+            Assert.Equal("aa", KvFile.Load(path).Get("ethernet0.pvnID"));
+            Assert.False(File.Exists(path + ".tmp"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    // QA: after a power cycle VMware appends ethernetN.pciSlotNumber / generatedAddress* far from the NIC block
+    [Fact]
+    public void RemoveNicDropsKeysVmwareAddedAtRuntime()
+    {
+        var f = new KvFile(
+            "ethernet1.present = \"TRUE\"\r\nethernet1.connectionType = \"pvn\"\r\nethernet1.pvnID = \"p\"\r\n" +
+            "usb.present = \"TRUE\"\r\n" +
+            "ethernet1.pciSlotNumber = \"34\"\r\nethernet1.generatedAddress = \"00:0c:29:e5:d1:7a\"\r\nethernet1.generatedAddressOffset = \"10\"\r\n" +
+            "ethernet10.present = \"TRUE\"\r\n");
+        f.RemoveNic(1);
+        Assert.Equal("usb.present = \"TRUE\"\r\nethernet10.present = \"TRUE\"\r\n", f.ToString());
+    }
+
+    // QA: preferences.ini as left by self-heal in the sandbox: gap at index 3, Cyrillic name at 2
+    [Fact]
+    public void SegmentsReadsGapsAndCyrillic()
+    {
+        var f = new KvFile(
+            "pref.namedPVNs0.name = \"pre-direct\"\r\npref.namedPVNs0.pvnID = \"p0\"\r\npref.namedPVNs.count = \"5\"\r\n" +
+            "pref.namedPVNs2.name = \"qa1-тест2\"\r\npref.namedPVNs2.pvnID = \"p2\"\r\n" +
+            "pref.namedPVNs4.name = \"lan1\"\r\npref.namedPVNs4.pvnID = \"p4\"\r\n");
+        var s = f.Segments();
+        Assert.Equal(3, s.Count);
+        Assert.Equal("qa1-тест2", s["P2"]);
+        Assert.False(f.EnsureSegment("QA1-ТЕСТ2", out var id));
+        Assert.Equal("p2", id);
+        Assert.True(f.EnsureSegment("new", out _));
+        Assert.Equal("new", f.Get("pref.namedPVNs5.name"));
+        Assert.Equal("6", f.Get("pref.namedPVNs.count"));
+    }
 }
 
 public class TopologyTests
@@ -256,6 +310,27 @@ public class TopologyTests
             Assert.Equal((@"C:\vm\a.vmx", Purpose.Router, 1.5, 2.0), (v.Vmx, v.Purpose, v.X, v.Y));
             var h = Assert.Single(l.Hubs);
             Assert.Equal(("lan", "p1", 3.0, 4.0), (h.Name, h.PvnId, h.X, h.Y));
+        }
+        finally { File.Delete(path); }
+    }
+
+    // QA: hand-written scheme with only "vms" gets defaults; garbage JSON throws (the app shows it in a message box)
+    [Fact]
+    public void SchemeLoadMinimalAndInvalid()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".vvm");
+        try
+        {
+            File.WriteAllText(path, "{\"vms\":[{\"vmx\":\"E:\\\\VMs\\\\ghost\\\\ghost.vmx\",\"purpose\":\"router\",\"x\":300,\"y\":300}]}");
+            var s = Scheme.Load(path);
+            Assert.Equal(new Pt(80, 80), s.Internet);
+            Assert.Empty(s.Hubs);
+            Assert.Equal(Purpose.Router, Assert.Single(s.Vms).Purpose);
+
+            File.WriteAllText(path, "{ not json");
+            Assert.ThrowsAny<System.Text.Json.JsonException>(() => Scheme.Load(path));
+            File.WriteAllText(path, "null");
+            Assert.Throws<InvalidDataException>(() => Scheme.Load(path));
         }
         finally { File.Delete(path); }
     }
