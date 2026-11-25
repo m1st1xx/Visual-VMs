@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     static readonly object InternetKey = new();
     static readonly string LastPath = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VisualVMs", "last.txt");
     const string GuiWarning = "VMware Workstation открыт — закройте его, иначе имя сегмента может пропасть из VMware (сеть будет работать)";
+    const string VmxGuiWarning = "VMware Workstation открыт — закройте вкладку ВМ, иначе VMware может перезаписать изменения сети";
 
     Scheme scheme = new();
     string? path;
@@ -38,8 +39,18 @@ public partial class MainWindow : Window
         InitializeComponent();
         Loaded += (_, _) =>
         {
-            var last = File.Exists(LastPath) ? File.ReadAllText(LastPath).Trim() : "";
-            if (File.Exists(last)) OpenScheme(last); else Resync();
+            // a broken last scheme must not crash every start: fall back to a new one
+            try
+            {
+                var last = File.Exists(LastPath) ? File.ReadAllText(LastPath).Trim() : "";
+                if (File.Exists(last)) OpenScheme(last); else Resync();
+            }
+            catch (Exception ex)
+            {
+                (scheme, path, dirty) = (new(), null, false);
+                Resync();
+                Status.Text = "Не удалось открыть последнюю схему: " + ex.Message;
+            }
             UpdateTitle();
             var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             timer.Tick += async (_, _) => await Poll();
@@ -312,7 +323,7 @@ public partial class MainWindow : Window
             VmNode vm => new[]
             {
                 Item("Включить", () => Busy(async () => { await Vmware.Start(vm.Vmx); running.Add(IOPath.GetFullPath(vm.Vmx)); UpdateDots(); })),
-                Item("Выключить", () => Busy(() => Vmware.StopSoftThenHard(vm.Vmx))),
+                Item("Выключить", () => Confirm($"Выключить {vm.Name}? Мягко, при неудаче — принудительно.") ? Busy(() => Vmware.StopSoftThenHard(vm.Vmx)) : Task.CompletedTask),
                 Item("Открыть консоль", () => { OpenConsole(vm); return Task.CompletedTask; }),
                 Sub("Удалить", DeleteItems(vm)),
             },
@@ -407,10 +418,12 @@ public partial class MainWindow : Window
             if (!Confirm($"Удалить {vm.Name} с диска безвозвратно? Включённая ВМ будет выключена.")) return;
             await Busy(async () =>
             {
-                try { await Vmware.DeleteVm(vm.Vmx); }
+                string? left;
+                try { left = await Vmware.DeleteVm(vm.Vmx); }
                 catch (Exception ex) { throw new InvalidOperationException(ex.Message + "\n\nВозможно, ВМ открыта во вкладке VMware — закройте вкладку и повторите."); }
                 scheme.Vms.Remove(vm);
                 MarkDirty();
+                if (left != null) Status.Text = $"Удалите «{vm.Name}» из библиотеки VMware вручную ({left})";
             });
             Resync();
         }),
@@ -425,10 +438,14 @@ public partial class MainWindow : Window
         return id;
     }
 
-    async Task Apply(List<(string Vmx, Action<KvFile> Edit)> edits)
+    /// <summary>Returns false if the user cancelled.</summary>
+    async Task<bool> Apply(List<(string Vmx, Action<KvFile> Edit)> edits)
     {
-        try { await Vmware.ApplyAsync(edits); }
+        bool gui = Vmware.GuiRunning, ok;
+        try { ok = await Vmware.ApplyAsync(edits); }
         finally { Resync(); }
+        if (ok && gui) Status.Text = (Status.Text == GuiWarning ? GuiWarning + ". " : "") + VmxGuiWarning;
+        return ok;
     }
 
     async Task Connect(object a, object b)
@@ -440,8 +457,11 @@ public partial class MainWindow : Window
         SetMode(Mode.Idle);
         if (other is VmNode vm2)
         {
-            if (edges.Any(e => e.Kind == EdgeKind.Direct && e.Ends.Any(x => x.Vm == vm) && e.Ends.Any(x => x.Vm == vm2))) { Error("Уже соединены"); return; }
-            var seg = $"{vm.Name}-{vm2.Name}";
+            bool Pvn(Nic n) => n.Type == "pvn" && !string.IsNullOrEmpty(n.PvnId);
+            if (vm.Nics.Where(Pvn).Any(n => vm2.Nics.Where(Pvn).Any(m => string.Equals(m.PvnId, n.PvnId, StringComparison.OrdinalIgnoreCase)))) { Error("Уже соединены"); return; }
+            string seg;
+            try { seg = Topology.FreeSegmentName($"{vm.Name}-{vm2.Name}", Vmware.Segments()); }
+            catch (Exception ex) { Error("preferences.ini: " + ex.Message); return; }
             if (!Confirm($"Соединить {vm.Name} и {vm2.Name} (сегмент {seg})?")) return;
             await Busy(async () =>
             {
@@ -482,7 +502,7 @@ public partial class MainWindow : Window
         if (!Confirm($"Удалить сегмент {hub.Name} и его адаптеры у {vms.Count} ВМ?")) return;
         await Busy(async () =>
         {
-            if (vms.Count > 0 && !await Vmware.ApplyAsync(vms.Select(v => (v.Vmx, (Action<KvFile>)(k =>
+            if (vms.Count > 0 && !await Apply(vms.Select(v => (v.Vmx, (Action<KvFile>)(k =>
                 {
                     foreach (var n in k.Nics().Where(Uses)) k.RemoveNic(n.Index);
                 }))).ToList())) return;

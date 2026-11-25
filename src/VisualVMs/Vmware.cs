@@ -35,13 +35,20 @@ public static class Vmware
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
         using var cts = new CancellationTokenSource(timeoutMs);
-        try { await p.WaitForExitAsync(cts.Token); }
+        try
+        {
+            await p.WaitForExitAsync(cts.Token);
+            // a child (vmware-vmx, tray) may inherit the pipes and keep them open after vmrun exits
+            await Task.WhenAll(stdout, stderr).WaitAsync(cts.Token);
+        }
         catch (OperationCanceledException)
         {
-            p.Kill(true);
-            return (false, $"Превышено время ожидания: {Path.GetFileName(exe)} {string.Join(" ", args)}");
+            // not Kill(true): the process tree can contain a VM process
+            try { p.Kill(); } catch (InvalidOperationException) { }
+            string Done(Task<string> t) => t.IsCompletedSuccessfully ? t.Result : "";
+            return (false, $"Превышено время ожидания: {Path.GetFileName(exe)} {string.Join(" ", args)}\n{Done(stdout)}{Done(stderr)}".Trim());
         }
-        return (p.ExitCode == 0, ((await stdout) + (await stderr)).Trim());
+        return (p.ExitCode == 0, (stdout.Result + stderr.Result).Trim());
     }
 
     static void Check((bool Ok, string Out) r)
@@ -61,11 +68,17 @@ public static class Vmware
 
     public static async Task Start(string vmx) => Check(await Run(Vmrun, ["-T", "ws", "start", vmx, "nogui"], 120000));
 
-    public static async Task StopSoftThenHard(string vmx)
+    /// <summary>Soft stop; if it fails or times out, asks before a hard power-off. Returns false if the user said No.</summary>
+    public static async Task<bool> StopSoftThenHard(string vmx)
     {
         if (!(await Run(Vmrun, ["-T", "ws", "stop", vmx, "soft"], 60000)).Ok)
+        {
+            if (MessageBox.Show($"{Path.GetFileNameWithoutExtension(vmx)}: мягкое выключение не удалось (нет VMware Tools?). Выключить принудительно?",
+                    "Visual VMs", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
             Check(await Run(Vmrun, ["-T", "ws", "stop", vmx, "hard"]));
+        }
         await WaitStopped(vmx);
+        return true;
     }
 
     static async Task WaitStopped(string vmx)
@@ -78,7 +91,9 @@ public static class Vmware
         throw new InvalidOperationException($"ВМ не выключилась за 30 с: {vmx}");
     }
 
-    public static async Task DeleteVm(string vmx)
+    /// <summary>Deletes the VM files, our backup, the folder if left empty, and the library entry.
+    /// Returns why the library entry could not be removed, or null.</summary>
+    public static async Task<string?> DeleteVm(string vmx)
     {
         if ((await ListRunning()).Contains(Full(vmx)))
         {
@@ -86,6 +101,18 @@ public static class Vmware
             await WaitStopped(vmx);
         }
         Check(await Run(Vmrun, ["-T", "ws", "deleteVM", vmx], 120000));
+        // the VM is gone already: leftovers must not turn this into a failure
+        try
+        {
+            File.Delete(vmx + ".vvm.bak");
+            var dir = Path.GetDirectoryName(Full(vmx))!;
+            if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); // never recursive
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        if (GuiRunning) return "VMware открыт"; // it keeps the library in memory and would write the entry back
+        try { EditFile(InventoryPath, k => k.RemoveVmListEntry(Full(vmx)), createIfMissing: false); }
+        catch (Exception ex) { return ex.Message; }
+        return null;
     }
 
     static void Launch(params string[] args)
@@ -95,7 +122,8 @@ public static class Vmware
         Process.Start(psi)?.Dispose();
     }
 
-    public static void OpenConsole(string vmx) => Launch("-x", vmx);
+    // no -x: that would also power the VM on
+    public static void OpenConsole(string vmx) => Launch(vmx);
 
     public static bool GuiRunning => Process.GetProcessesByName("vmware").Length > 0;
 
@@ -109,18 +137,24 @@ public static class Vmware
         LoadPrefs()?.Get("prefvmx.defaultVMPath") is { Length: > 0 } p ? p
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "Virtual Machines");
 
-    static bool prefsBackedUp;
-
-    static bool EditPrefs(Func<KvFile, bool> edit)
+    /// <summary>Copies path to path.vvm.bak once (keeps the pre-app original), then saves.</summary>
+    static void SaveWithBackup(string path, KvFile k)
     {
-        var k = LoadPrefs() ?? new KvFile(".encoding = \"UTF-8\"\n");
+        if (File.Exists(path) && !File.Exists(path + ".vvm.bak")) File.Copy(path, path + ".vvm.bak");
+        k.Save(path);
+    }
+
+    static bool EditFile(string path, Func<KvFile, bool> edit, bool createIfMissing = true)
+    {
+        if (!createIfMissing && !File.Exists(path)) return false;
+        var k = File.Exists(path) ? KvFile.Load(path) : new KvFile(".encoding = \"UTF-8\"\n");
         if (!edit(k)) return false;
-        Directory.CreateDirectory(Path.GetDirectoryName(PrefsPath)!);
-        if (!prefsBackedUp && File.Exists(PrefsPath)) File.Copy(PrefsPath, PrefsPath + ".vvm.bak", true);
-        prefsBackedUp = true;
-        k.Save(PrefsPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        SaveWithBackup(path, k);
         return true;
     }
+
+    static bool EditPrefs(Func<KvFile, bool> edit) => EditFile(PrefsPath, edit);
 
     /// <summary>Returns the pvnID of the named LAN segment, creating it in preferences.ini if needed.</summary>
     public static string EnsureSegment(string name, out bool wrote)
@@ -176,16 +210,28 @@ public static class Vmware
         {
             if (MessageBox.Show($"ВМ включена: {string.Join(", ", on.Select(v => names[v]))}. Выключить (мягко, при неудаче — принудительно) и применить?",
                     "Visual VMs", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return false;
-            foreach (var vmx in on) await StopSoftThenHard(vmx);
+            foreach (var vmx in on)
+                if (!await StopSoftThenHard(vmx)) return false;
         }
         // edit everything in memory first so a failing edit (e.g. 10 NICs) leaves all files untouched
-        var loaded = paths.Select(v => (Vmx: v, K: KvFile.Load(v))).ToList();
-        foreach (var (vmx, k) in loaded)
+        var loaded = paths.Select(v => (Vmx: v, Orig: File.ReadAllBytes(v))).Select(x => (x.Vmx, x.Orig, K: KvFile.Parse(x.Orig))).ToList();
+        foreach (var (vmx, _, k) in loaded)
             foreach (var e in edits.Where(e => Full(e.Vmx).Equals(vmx, StringComparison.OrdinalIgnoreCase))) e.Edit(k);
-        foreach (var (vmx, k) in loaded)
+        var saved = new List<(string Vmx, byte[] Orig)>();
+        try
         {
-            File.Copy(vmx, vmx + ".vvm.bak", true);
-            k.Save(vmx);
+            foreach (var (vmx, orig, k) in loaded)
+            {
+                SaveWithBackup(vmx, k);
+                saved.Add((vmx, orig));
+            }
+        }
+        catch
+        {
+            // all-or-nothing: put back the VMs already written
+            foreach (var (vmx, orig) in saved)
+                try { File.WriteAllBytes(vmx, orig); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            throw;
         }
         return true;
     }
@@ -254,9 +300,13 @@ public static class Vmware
         }
         catch
         {
-            // the folder was ours and empty before: put it back the way it was
-            Directory.Delete(dir, true);
-            if (existed) Directory.CreateDirectory(dir);
+            // the folder was ours and empty before: put it back the way it was; a cleanup failure must not hide the real error
+            try
+            {
+                Directory.Delete(dir, true);
+                if (existed) Directory.CreateDirectory(dir);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             throw;
         }
     }

@@ -446,6 +446,25 @@ public class TopologyTests
 public class VmwareTests
 {
     [Fact]
+    public async Task RunReturnsOutput()
+    {
+        var r = await Vmware.Run("cmd.exe", ["/c", "echo hi"]);
+        Assert.Equal((true, "hi"), r);
+        Assert.False((await Vmware.Run("cmd.exe", ["/c", "exit 3"])).Ok);
+    }
+
+    // review #1: a child that inherits the pipes (like vmware-vmx) must not hang Run past its timeout
+    [Fact]
+    public async Task RunTimeoutCoversInheritedPipes()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var r = await Vmware.Run("cmd.exe", ["/c", "start", "/b", "ping", "-n", "8", "127.0.0.1"], 1500);
+        Assert.True(sw.ElapsedMilliseconds < 5000, $"took {sw.ElapsedMilliseconds} ms");
+        Assert.False(r.Ok);
+        Assert.Contains("Превышено время ожидания", r.Out);
+    }
+
+    [Fact]
     public void ValidateCreateRequest()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
