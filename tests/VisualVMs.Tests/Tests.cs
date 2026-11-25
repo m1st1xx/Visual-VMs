@@ -305,6 +305,8 @@ public class UiSmokeTests
                 var w = new MainWindow();
                 foreach (var key in new[] { "Router", "Server", "Client", "Cloud" })
                     Assert.IsAssignableFrom<System.Windows.Media.Geometry>(w.FindResource(key));
+                new CreateVmWindow();
+                new AddVmsWindow(new() { ("a", @"C:\a\a.vmx") });
             }
             catch (Exception ex) { error = ex; }
         });

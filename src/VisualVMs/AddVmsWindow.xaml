@@ -1,0 +1,37 @@
+<Window x:Class="VisualVMs.AddVmsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Добавить ВМ" Height="420" Width="720" WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="12">
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Text="Отметьте ВМ и выберите предназначение каждой:"/>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Добавить" IsDefault="True" Width="90" Click="Add_Click"/>
+            <Button Content="Отмена" IsCancel="True" Width="90" Margin="8,0,0,0"/>
+        </StackPanel>
+        <DataGrid x:Name="VmGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                  HeadersVisibility="Column" SelectionMode="Single">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding Selected, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Имя" Binding="{Binding Name}" IsReadOnly="True" Width="160"/>
+                <DataGridTextColumn Header="Путь" Binding="{Binding Vmx}" IsReadOnly="True" Width="*"/>
+                <DataGridTemplateColumn Header="Предназначение" Width="140">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox SelectedIndex="{Binding PurposeIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                <ComboBoxItem Content="Роутер"/>
+                                <ComboBoxItem Content="Сервер"/>
+                                <ComboBoxItem Content="Клиент (ПК)"/>
+                            </ComboBox>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>

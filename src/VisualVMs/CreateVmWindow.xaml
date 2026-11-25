@@ -1,0 +1,64 @@
+<Window x:Class="VisualVMs.CreateVmWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Создать ВМ" SizeToContent="Height" Width="460" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.Resources>
+            <Style TargetType="TextBlock"><Setter Property="Margin" Value="0,4,8,4"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+            <Style TargetType="TextBox"><Setter Property="Margin" Value="0,4"/></Style>
+            <Style TargetType="ComboBox"><Setter Property="Margin" Value="0,4"/></Style>
+        </Grid.Resources>
+
+        <TextBlock Text="Имя"/>
+        <TextBox x:Name="NameBox" Grid.Column="1" Grid.ColumnSpan="2"/>
+
+        <TextBlock Grid.Row="1" Text="Система"/>
+        <ComboBox x:Name="OsBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" SelectionChanged="OsBox_SelectionChanged"/>
+
+        <TextBlock Grid.Row="2" Text="ISO-образ"/>
+        <TextBox x:Name="IsoBox" Grid.Row="2" Grid.Column="1"/>
+        <Button Grid.Row="2" Grid.Column="2" Content="Обзор…" Margin="6,4,0,4" Padding="8,0" Click="Browse_Click"/>
+
+        <TextBlock Grid.Row="3" Text="ОЗУ, МБ"/>
+        <TextBox x:Name="RamBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"/>
+
+        <TextBlock Grid.Row="4" Text="Ядра"/>
+        <TextBox x:Name="CpuBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2"/>
+
+        <TextBlock Grid.Row="5" Text="Диск, ГБ"/>
+        <TextBox x:Name="DiskBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2"/>
+
+        <TextBlock Grid.Row="6" Text="Предназначение"/>
+        <ComboBox x:Name="PurposeBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" SelectedIndex="2">
+            <ComboBoxItem Content="Роутер"/>
+            <ComboBoxItem Content="Сервер"/>
+            <ComboBoxItem Content="Клиент (ПК)"/>
+        </ComboBox>
+
+        <TextBox x:Name="Win11Hint" Grid.Row="7" Grid.ColumnSpan="3" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap"
+                 Background="#FFF8E1" BorderThickness="0" Padding="6" Margin="0,8,0,0"
+                 Text="Если установщик Windows 11 пишет, что ПК не соответствует требованиям (TPM), нажмите Shift+F10 и выполните:&#10;reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f&#10;То же для BypassSecureBootCheck и BypassRAMCheck."/>
+
+        <StackPanel Grid.Row="8" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Создать" IsDefault="True" Width="90" Click="Create_Click"/>
+            <Button Content="Отмена" IsCancel="True" Width="90" Margin="8,0,0,0"/>
+        </StackPanel>
+    </Grid>
+</Window>

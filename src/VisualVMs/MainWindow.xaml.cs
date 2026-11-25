@@ -326,6 +326,8 @@ public partial class MainWindow : Window
 
     MenuItem[] CanvasMenu() => new[]
     {
+        Item("Создать вм", CreateVm),
+        Item("Добавить вм", () => { AddVms(); return Task.CompletedTask; }),
         Item("Удалить вм", () => { SetMode(Mode.PickDelete, "Выберите ВМ (Esc — отмена)"); return Task.CompletedTask; }),
         Sub("Сеть вм", new[]
         {
@@ -356,6 +358,41 @@ public partial class MainWindow : Window
     {
         try { Vmware.OpenConsole(vm.Vmx); }
         catch (Exception ex) { Error(ex.Message); }
+    }
+
+    async Task CreateVm()
+    {
+        var d = new CreateVmWindow { Owner = this };
+        if (d.ShowDialog() != true) return;
+        var (r, at) = (d.Request!, menuPoint);
+        await Busy(async () =>
+        {
+            var vm = new VmNode { Vmx = await Vmware.CreateVm(r), Purpose = r.Purpose };
+            SetCenter(vm, at);
+            scheme.Vms.Add(vm);
+            MarkDirty();
+        });
+        Resync();
+    }
+
+    void AddVms()
+    {
+        var have = scheme.Vms.Select(v => IOPath.GetFullPath(v.Vmx)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        List<(string Name, string Vmx)> list;
+        try { list = Vmware.ReadInventory().Where(x => !have.Contains(x.Vmx)).DistinctBy(x => x.Vmx, StringComparer.OrdinalIgnoreCase).ToList(); }
+        catch (Exception ex) { Error("Не удалось прочитать список ВМ VMware: " + ex.Message); return; }
+        if (list.Count == 0) { Error("В VMware нет ВМ, которых ещё нет на схеме"); return; }
+        var d = new AddVmsWindow(list) { Owner = this };
+        if (d.ShowDialog() != true) return;
+        int cols = (int)Math.Ceiling(Math.Sqrt(d.Result.Count));
+        for (int i = 0; i < d.Result.Count; i++)
+        {
+            var vm = new VmNode { Vmx = d.Result[i].Vmx, Purpose = d.Result[i].Purpose };
+            SetCenter(vm, new(menuPoint.X + i % cols * 140, menuPoint.Y + i / cols * 140));
+            scheme.Vms.Add(vm);
+        }
+        MarkDirty();
+        Resync();
     }
 
     MenuItem[] DeleteItems(VmNode vm) => new[]
