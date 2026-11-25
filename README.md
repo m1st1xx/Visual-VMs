@@ -4,7 +4,7 @@
 
 **Скачать:** [dist/VisualVMs.exe](dist/VisualVMs.exe) (один файл, нужен .NET 8 Desktop Runtime x64). **Инструкция пользователя:** [docs/USAGE.md](docs/USAGE.md).
 
-Документация для разработчика: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/VMWARE.md](docs/VMWARE.md), [docs/STATUS.md](docs/STATUS.md).
+Документация для разработчика: [docs/BUILD.md](docs/BUILD.md) (сборка и тесты), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/VMWARE.md](docs/VMWARE.md), [docs/STATUS.md](docs/STATUS.md).
 
 ## Возможности
 
@@ -21,30 +21,23 @@
 - «Выключить» спрашивает подтверждение, выключает мягко; если VMware Tools в гостевой ОС не запущены или мягко не вышло (с причиной: гостевая ОС ещё выключается / вывод `vmrun`), отдельно спрашивает про принудительное выключение (по умолчанию «Нет»).
 - Схема сохраняется в файл `*.vvm` (меню «Файл»); последняя схема открывается при запуске. Если схема не открывается, программа один раз показывает ошибку и начинает новую схему; битая схема при следующих запусках больше не открывается.
 
-## Требования
+## Как скачать и запустить
 
-- Windows 10/11 x64, VMware Workstation 17.5+ (новые ВМ создаются с `virtualHW.version = "22"`) — `vmrun.exe`, `vmware.exe`, `vmware-vdiskmanager.exe` берутся из папки установки (реестр `HKLM\SOFTWARE\WOW6432Node\VMware, Inc.\VMware Workstation\InstallPath`).
-- Для сборки — .NET 8 SDK; для запуска — .NET 8 Desktop Runtime (или self-contained publish).
+Программа — один файл **`VisualVMs.exe`**, установка не нужна. Он лежит в этом репозитории в папке [`dist`](dist/).
 
-## Сборка, запуск, тесты
+1. **Установите VMware Workstation 17.5 или новее** (если ещё не установлен).
+2. **Установите .NET 8 Desktop Runtime (x64)** — без него exe не запустится:
+   - страница загрузки: https://dotnet.microsoft.com/download/dotnet/8.0 → блок **«.NET Desktop Runtime 8.0.x»** → **Windows x64 Installer**;
+   - прямая ссылка на последнюю версию: https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe
+   - запустите скачанный установщик → «Установить». Перезагрузка обычно не нужна.
+3. **Скачайте программу:** откройте [`dist/VisualVMs.exe`](dist/VisualVMs.exe) → справа кнопка **«Download raw file»** (значок со стрелкой вниз). Файл сохранится в папку «Загрузки».
+4. **Переместите** `VisualVMs.exe` в постоянную папку, например `C:\Programs\VisualVMs\` (схемы и настройки хранятся отдельно, папку можно выбрать любую).
+5. **Запустите** двойным щелчком по `VisualVMs.exe`. Если Windows покажет «Windows защитила ваш компьютер» — нажмите **«Подробнее» → «Выполнить в любом случае»** (у файла нет цифровой подписи).
+6. **Ярлык на рабочий стол:** ПКМ по `VisualVMs.exe` → «Отправить» → «Рабочий стол (создать ярлык)». В Windows 11: ПКМ → «Показать дополнительные параметры» → «Отправить».
 
-```
-dotnet build VisualVMs.sln
-dotnet test VisualVMs.sln
-dotnet run --project src\VisualVMs
-```
+Если при запуске появляется окно «You must install .NET to run this application» — не установлен (или установлен не тот) .NET 8 Desktop Runtime, вернитесь к шагу 2.
 
-## Сборка exe
-
-```
-dotnet publish src\VisualVMs -c Release -o publish
-```
-
-Готовая сборка лежит в репозитории: `dist\VisualVMs.exe` — после изменений кода обновляйте её: `dotnet publish src\VisualVMs -c Release -o publish` и скопируйте `publish\VisualVMs.exe` в `dist\`.
-
-Получается один файл `publish\VisualVMs.exe` (win-x64, со значком программы, версия 1.0.0). Настройки single-file публикации заданы в `VisualVMs.csproj` и действуют только при `dotnet publish`. Exe не самодостаточный: на компьютере нужен **.NET 8 Desktop Runtime** (x64). Значок `src\VisualVMs\app.ico` генерируется скриптом `tools\make-icon.ps1` (`powershell -File tools\make-icon.ps1 -Out "$PWD\src\VisualVMs\app.ico"` — путь указывайте полный).
-
-Тесты (xunit) работают только со строками в памяти и временными файлами; VMware и `%APPDATA%\VMware` не трогают (кроме `cmd.exe`/`ping` для проверки таймаутов запуска процессов).
+Как пользоваться программой — в [docs/USAGE.md](docs/USAGE.md).
 
 ## Использование
 
