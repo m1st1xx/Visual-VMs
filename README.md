@@ -2,6 +2,8 @@
 
 Визуальная схема сети для VMware Workstation в стиле Cisco Packet Tracer: ВМ — значки на поле, сеть — провода между ними. Программа не держит свою копию сети: провода всегда строятся по `.vmx` файлам, а изменения сети записываются прямо в `.vmx` (адаптеры `ethernetN.*`) и в `%APPDATA%\VMware\preferences.ini` (имена LAN-сегментов).
 
+**Скачать:** [dist/VisualVMs.exe](dist/VisualVMs.exe) (один файл, нужен .NET 8 Desktop Runtime x64). **Инструкция пользователя:** [docs/USAGE.md](docs/USAGE.md).
+
 Документация для разработчика: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/VMWARE.md](docs/VMWARE.md), [docs/STATUS.md](docs/STATUS.md).
 
 ## Возможности
@@ -38,11 +40,15 @@ dotnet run --project src\VisualVMs
 dotnet publish src\VisualVMs -c Release -o publish
 ```
 
+Готовая сборка лежит в репозитории: `dist\VisualVMs.exe` — после изменений кода обновляйте её: `dotnet publish src\VisualVMs -c Release -o publish` и скопируйте `publish\VisualVMs.exe` в `dist\`.
+
 Получается один файл `publish\VisualVMs.exe` (win-x64, со значком программы, версия 1.0.0). Настройки single-file публикации заданы в `VisualVMs.csproj` и действуют только при `dotnet publish`. Exe не самодостаточный: на компьютере нужен **.NET 8 Desktop Runtime** (x64). Значок `src\VisualVMs\app.ico` генерируется скриптом `tools\make-icon.ps1` (`powershell -File tools\make-icon.ps1 -Out "$PWD\src\VisualVMs\app.ico"` — путь указывайте полный).
 
 Тесты (xunit) работают только со строками в памяти и временными файлами; VMware и `%APPDATA%\VMware` не трогают (кроме `cmd.exe`/`ping` для проверки таймаутов запуска процессов).
 
 ## Использование
+
+Подробно, по шагам: [docs/USAGE.md](docs/USAGE.md). Кратко:
 
 1. ПКМ по полю → «Добавить вм» (или «Создать вм»), отметить ВМ, выбрать предназначение.
 2. ПКМ → «Сеть вм» → «Соединить напрямую», щёлкнуть два устройства (ВМ–ВМ, ВМ–облако). Для сети из нескольких ВМ: «Соединить несколько», ввести имя сегмента, затем щелчок по кругу и по ВМ.
