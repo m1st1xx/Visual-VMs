@@ -11,11 +11,12 @@
     <Version>1.0.0</Version>
   </PropertyGroup>
 
-  <!-- dotnet publish only: one framework-dependent exe (needs the .NET 8 Desktop Runtime) -->
+  <!-- dotnet publish only: one portable exe with the .NET runtime inside (no install, no admin rights) -->
   <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>false</SelfContained>
+    <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 

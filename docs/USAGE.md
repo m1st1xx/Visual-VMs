@@ -4,10 +4,10 @@ Visual VMs рисует виртуальные машины VMware Workstation �
 
 ## 1. Установка и запуск
 
-1. Нужны: Windows 10/11 x64, **VMware Workstation 17.5+**, **.NET 8 Desktop Runtime (x64)** — скачать: https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe (или https://dotnet.microsoft.com/download/dotnet/8.0 → «.NET Desktop Runtime» → Windows x64).
-2. Скачайте [`dist/VisualVMs.exe`](../dist/VisualVMs.exe) (на GitHub: открыть файл → кнопка «Download raw file»). Положите в любую папку, например `C:\Programs\VisualVMs\`.
+1. Нужны только Windows 10/11 x64 и **VMware Workstation 17.5+**. Программа portable: .NET уже внутри exe, установка и права администратора не нужны.
+2. Скачайте [`dist/VisualVMs.exe`](../dist/VisualVMs.exe) (на GitHub: открыть файл → кнопка «Download raw file»). Положите в любую папку (можно на флешку).
 3. Ярлык на рабочий стол: ПКМ по `VisualVMs.exe` → «Отправить» → «Рабочий стол (создать ярлык)».
-4. Запустите. Установка не нужна. Если Windows SmartScreen предупредит о неизвестном издателе — «Подробнее» → «Выполнить в любом случае».
+4. Запустите двойным щелчком. Если Windows SmartScreen предупредит о неизвестном издателе — «Подробнее» → «Выполнить в любом случае».
 
 При первом запуске открывается пустая схема с облаком «Интернет».
 

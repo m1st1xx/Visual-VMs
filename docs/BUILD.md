@@ -16,7 +16,9 @@ dotnet run --project src\VisualVMs
 dotnet publish src\VisualVMs -c Release -o publish
 ```
 
-Получается один файл `publish\VisualVMs.exe` (win-x64, со значком, версия 1.0.0). Настройки single-file публикации заданы в `VisualVMs.csproj` и действуют только при `dotnet publish`. Exe не самодостаточный: нужен .NET 8 Desktop Runtime (x64).
+Получается один portable-файл `publish\VisualVMs.exe` (~68 МБ, win-x64, со значком, версия 1.0.0): self-contained single-file со сжатием — .NET runtime внутри, на целевой машине ничего ставить не нужно, права администратора не нужны (манифеста с повышением нет, программа пишет только в профиль пользователя и файлы ВМ). Настройки заданы в `VisualVMs.csproj` и действуют только при `dotnet publish`; обычные `build`/`test` остаются framework-dependent.
+
+Проверено в песочнице (Windows 10): папка `C:\Program Files\dotnet` временно переименована, exe запущен через `runas /trustlevel:0x20000` (токен без прав администратора) — окно открывается, «Добавить вм» читает библиотеку VMware.
 
 После изменений кода обновите готовую сборку в репозитории: скопируйте `publish\VisualVMs.exe` в `dist\` и закоммитьте. Если `publish\VisualVMs.exe` запущен, publish упадёт с «file is being used by another process» — закройте программу.
 
